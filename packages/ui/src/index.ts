@@ -26,6 +26,7 @@ export * from './client-plugin-runtime.js';
 export * from './chat-empty-hero.js';
 export * from './chat-model-helpers.js';
 export * from './use-mounted-ref.js';
+export * from './use-draft-mutation-guard.js';
 export * from './session-setting-intent.js';
 export * from './components.js';
 export type { ComposerProps } from './components.js';
@@ -39,6 +40,7 @@ export type {
 export type { SessionMoveTarget } from './session-rail-context.js';
 export * from './session-status-presentation.js';
 export * from './composer-helpers.js';
+export type { ContextUsageReading } from './context-usage-reading.js';
 export * from './conversation-copy.js';
 export * from './shared-ui-copy.js';
 export * from './skills-copy.js';
