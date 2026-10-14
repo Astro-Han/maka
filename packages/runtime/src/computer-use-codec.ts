@@ -270,6 +270,7 @@ export const computerParams = z.discriminatedUnion('action', [
     .object({
       action: z.literal('type'),
       observation_id: z.string().min(1).max(256),
+      element_id: z.string().min(1).max(256).optional(),
       text,
       ...deliveryMode,
     })

@@ -134,12 +134,12 @@ function keyCall(chord: string): { name: 'press_key' | 'hotkey'; args: RecordVal
   return { name: 'hotkey', args: { keys: [...modifiers, key] } };
 }
 
-function failure(error: ComputerUseErrorCode): CuRunResult {
+function failure(error: ComputerUseErrorCode, message = ERROR_SENTENCES[error]): CuRunResult {
   return {
     outcome: {
       ok: false,
       error,
-      message: ERROR_SENTENCES[error],
+      message,
       messageIsAppTextFree: true,
       ...(BEFORE_DISPATCH.has(error) ? { evidence: { path: 'none' } } : {}),
     },
@@ -591,6 +591,14 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
           );
         case 'set_value':
           return act('set_value', { ...target, value: action.value }, snapshot, signal, context);
+        case 'type':
+          return act(
+            'type_text',
+            { ...target, text: action.text, delivery_mode: action.deliveryMode ?? 'background' },
+            snapshot,
+            signal,
+            context,
+          );
         case 'secondary_action':
           if (!['press', 'show_menu', 'pick', 'confirm', 'cancel', 'open'].includes(action.action))
             return failure('unsupported_action');
@@ -630,6 +638,11 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
         case 'press_key': {
           const key = keyCall(action.key);
           if (!key) return failure('unsupported_action');
+          if (key.name === 'press_key' && !token)
+            return failure(
+              'dispatch_refused',
+              'Use press_key with an observed element_id; the executor does not report focus.',
+            );
           return act(
             key.name,
             { ...target, ...key.args, delivery_mode: action.deliveryMode ?? 'background' },
@@ -687,18 +700,23 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
         }
       }
       if (action.type === 'type')
-        return act(
-          'type_text',
-          { text: action.text, delivery_mode: action.deliveryMode ?? 'background' },
-          snapshot,
-          signal,
-          context,
+        return failure(
+          'dispatch_refused',
+          'Use type with an observed element_id; the executor does not report focus.',
         );
       const key = keyCall(action.text);
       if (!key) return failure('unsupported_action');
+      if (key.name === 'press_key')
+        return failure(
+          'dispatch_refused',
+          'Use press_key with an observed element_id; the executor does not report focus.',
+        );
       return act(
         key.name,
-        { ...key.args, delivery_mode: action.deliveryMode ?? 'background' },
+        {
+          ...key.args,
+          delivery_mode: action.deliveryMode ?? 'background',
+        },
         snapshot,
         signal,
         context,

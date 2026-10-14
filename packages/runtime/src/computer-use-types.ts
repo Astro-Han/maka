@@ -249,6 +249,14 @@ export interface CuObservation {
 
 export type CuSemanticAction =
   | {
+      type: 'type';
+      deliveryMode?: 'background' | 'foreground';
+      observationId: string;
+      elementId: string;
+      text: string;
+      elementIdentity?: CuObservedElement['identity'];
+    }
+  | {
       type: 'click_element';
       deliveryMode?: 'background' | 'foreground';
       observationId: string;

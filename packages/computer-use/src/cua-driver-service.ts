@@ -19,7 +19,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { Client } from '@modelcontextprotocol/client';
+import { Client, SdkError, SdkErrorCode } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 export type CuaDriverServiceState = 'idle' | 'starting' | 'ready' | 'unavailable' | 'disposed';
@@ -47,6 +47,16 @@ export class CuaDriverService {
     return { state: this.state, generation: this.generation };
   }
 
+  private invalidate(client: Client): void {
+    if (this.client !== client) return;
+    this.client = undefined;
+    this.generation += 1;
+    if (this.state !== 'disposed') {
+      this.state = 'unavailable';
+      this.onUnexpectedClose?.();
+    }
+  }
+
   private async open(): Promise<Client> {
     if (this.state === 'disposed') throw new Error('Cua Driver service is disposed');
     if (this.client) return this.client;
@@ -57,7 +67,6 @@ export class CuaDriverService {
         .update(await readFile(this.binaryPath))
         .digest('hex');
       if (actualSha256 !== this.expectedBinarySha256) {
-        this.state = 'unavailable';
         throw new Error('Cua Driver binary no longer matches its pinned digest');
       }
       if (this.state === 'disposed')
@@ -86,19 +95,10 @@ export class CuaDriverService {
           capabilities: {},
         },
       );
-      client.onclose = () => {
-        if (this.client !== client) return;
-        this.client = undefined;
-        this.generation += 1;
-        if (this.state !== 'disposed') {
-          this.state = 'unavailable';
-          this.onUnexpectedClose?.();
-        }
-      };
+      client.onclose = () => this.invalidate(client);
       try {
         await client.connect(transport, { timeout: 10_000 });
       } catch (error) {
-        this.state = 'unavailable';
         await client.close().catch(() => {});
         throw error;
       }
@@ -128,10 +128,18 @@ export class CuaDriverService {
   ): Promise<CuaDriverResult> {
     if (signal.aborted) throw signal.reason ?? new Error('Cua Driver call aborted');
     const client = await this.open();
-    return client.callTool(
-      { name, arguments: args },
-      { signal, timeout: 25_000 },
-    ) as Promise<CuaDriverResult>;
+    try {
+      return (await client.callTool(
+        { name, arguments: args },
+        { signal, timeout: 25_000 },
+      )) as CuaDriverResult;
+    } catch (error) {
+      if (SdkError.isInstance(error) && error.code === SdkErrorCode.RequestTimeout) {
+        this.invalidate(client);
+        await client.close().catch(() => {});
+      }
+      throw error;
+    }
   }
 
   async dispose(): Promise<void> {

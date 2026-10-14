@@ -1077,19 +1077,12 @@ export function buildComputerUseTools(deps: {
     action: CuAction | CuSemanticAction,
   ): CuaBoundAction | { rejection: BindingFailureReason } {
     const active = record.state.activeObservation();
-    const semantic =
-      action.type === 'click_element' ||
-      action.type === 'set_value' ||
-      action.type === 'select_text' ||
-      action.type === 'press_key' ||
-      action.type === 'scroll_element' ||
-      action.type === 'window_action' ||
-      action.type === 'secondary_action';
+    const semantic = 'observationId' in action;
     const semanticAction = semantic ? (action as CuSemanticAction) : undefined;
     const semanticValue =
       semanticAction?.type === 'set_value'
         ? semanticAction.value
-        : semanticAction?.type === 'select_text'
+        : semanticAction?.type === 'select_text' || semanticAction?.type === 'type'
           ? semanticAction.text
           : semanticAction?.type === 'secondary_action'
             ? semanticAction.action
@@ -1604,6 +1597,7 @@ export function buildComputerUseTools(deps: {
       'A "+name,name" suffix lists what that element accepts as a secondary_action, and an element with no suffix ' +
       'offers nothing beyond click_element that this executor knows of. ' +
       '[focused] marks where a key sent without an element_id will land, when the executor reports focus. ' +
+      'Use type with element_id to insert into a named control, and press_key with element_id for a single key. Executors that do not report focus refuse untargeted input. ' +
       'Coordinate mutation is not part of the Computer Use action space. Use click_element, set_value, ' +
       'scroll_element, secondary_action, window_action or element_sequence; if those cannot express the task, report the capability gap. ' +
       'A screenshot provides visual evidence but does not enable synthetic input. ' +
@@ -2478,6 +2472,7 @@ export function buildComputerUseTools(deps: {
             };
           }
           if (
+            (input.action === 'type' && input.element_id !== undefined) ||
             input.action === 'click_element' ||
             input.action === 'set_value' ||
             input.action === 'select_text' ||
@@ -2522,13 +2517,16 @@ export function buildComputerUseTools(deps: {
                       elementIdentity: record.elements?.get(input.element_id)?.identity,
                     }
                   : {
-                      ...(input.action === 'select_text'
+                      ...(input.action === 'select_text' || input.action === 'type'
                         ? {
-                            type: 'select_text' as const,
+                            type: input.action,
                             observationId: input.observation_id,
-                            elementId: input.element_id,
+                            elementId: input.element_id!,
                             text: input.text,
-                            elementIdentity: record.elements?.get(input.element_id)?.identity,
+                            ...(input.action === 'type' && input.delivery_mode
+                              ? { deliveryMode: input.delivery_mode }
+                              : {}),
+                            elementIdentity: record.elements?.get(input.element_id!)?.identity,
                           }
                         : input.action === 'secondary_action'
                           ? {

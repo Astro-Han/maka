@@ -41,7 +41,19 @@ test('selected backend enforces physical input and advances Runtime on executor 
         case 'list_apps':
           return { content: [], structuredContent: { apps: [{ bundle_id: 'Fixture', pid: 42 }] } };
         case 'get_window_state':
-          return { content: [], structuredContent: { snapshot_id: 'fixture', elements: [] } };
+          return {
+            content: [],
+            structuredContent: {
+              snapshot_id: 'fixture',
+              elements: [
+                {
+                  element_index: 0,
+                  element_token: 'fixture:0',
+                  role: 'AXTextField',
+                },
+              ],
+            },
+          };
         default:
           dispatched.push(name);
           throw new Error(`Unexpected dispatch: ${name}`);
@@ -78,6 +90,7 @@ test('selected backend enforces physical input and advances Runtime on executor 
   const action = (await tool.impl(
     {
       action: 'type',
+      element_id: '0',
       text: 'blocked',
       observation_id: JSON.parse(observed.text).observation_id,
     } as never,

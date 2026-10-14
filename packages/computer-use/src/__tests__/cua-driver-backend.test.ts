@@ -18,13 +18,81 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { buildComputerUseTools } from '@maka/runtime/computer-use-tools';
+import { Client } from '@modelcontextprotocol/client';
 import { createCuaDriverBackend } from '../cua-driver-backend.js';
 import { CuaDriverService, type CuaDriverResult } from '../cua-driver-service.js';
+
+test('a hung request retires its child without replay and the next observation restarts it', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'maka-cua-timeout-'));
+  const path = join(directory, 'cua-driver');
+  const log = join(directory, 'calls');
+  const source = `#!${process.execPath}
+const fs = require('node:fs');
+const readline = require('node:readline');
+const log = ${JSON.stringify(log)};
+const recovered = fs.existsSync(log);
+fs.appendFileSync(log, process.pid + '\\n');
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  if (request.method === 'initialize') {
+    console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: {
+      protocolVersion: request.params.protocolVersion, capabilities: { tools: {} },
+      serverInfo: { name: 'qualification-fixture', version: '1' }
+    } }));
+  } else if (request.method === 'tools/call') {
+    fs.appendFileSync(log, request.params.name + '\\n');
+    if (recovered) console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id,
+      result: { content: [], structuredContent: { recovered: true } } }));
+  }
+});
+`;
+  const original = Client.prototype.callTool;
+  t.mock.method(
+    Client.prototype,
+    'callTool',
+    function (
+      this: Client,
+      params: Parameters<Client['callTool']>[0],
+      options: Parameters<Client['callTool']>[1],
+    ) {
+      return original.call(this, params, { ...options, timeout: 50 });
+    },
+  );
+  let invalidations = 0;
+  const service = new CuaDriverService(
+    path,
+    createHash('sha256').update(source).digest('hex'),
+    () => {
+      invalidations += 1;
+    },
+  );
+  try {
+    await writeFile(path, source, { mode: 0o755 });
+    const signal = new AbortController().signal;
+    await assert.rejects(service.call('type_text', { text: 'once' }, signal), /timed out/i);
+    assert.equal(service.snapshot().state, 'unavailable');
+    assert.equal(invalidations, 1);
+    const retired = service.snapshot().generation;
+    const result = await service.call('get_window_state', {}, signal);
+    assert.equal(result.structuredContent?.recovered, true);
+    assert.ok(service.snapshot().generation > retired);
+    const lines = (await readFile(log, 'utf8')).trim().split('\n');
+    assert.deepEqual(
+      lines.filter((line) => !/^\d+$/.test(line)),
+      ['type_text', 'get_window_state'],
+    );
+    assert.throws(() => process.kill(Number(lines[0]), 0), /ESRCH/);
+  } finally {
+    await service.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('a replaced executable cannot be spawned after the initial host check', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'maka-cua-integrity-'));
@@ -45,6 +113,7 @@ test('a replaced executable cannot be spawned after the initial host check', asy
 
 test('bundle-id observation, background refusal, and explicit foreground retry pass through Maka Computer', async () => {
   let snapshot = 0;
+  const values = { observed: '', current: '' };
   let unexpectedClose: (() => void) | undefined;
   const invalidated: string[] = [];
   const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
@@ -107,6 +176,12 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
                 label: 'Submit',
                 parent_index: 0,
               },
+              {
+                element_index: 2,
+                element_token: `s${snapshot.toString(16).padStart(8, '0')}:2`,
+                role: 'AXTextField',
+                parent_index: 0,
+              },
             ],
           },
         };
@@ -121,6 +196,12 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
       if (name === 'click' && args.delivery_mode === 'foreground') {
         return { content: [], structuredContent: { route: 'accessibility', effect: 'confirmed' } };
       }
+      if (name === 'type_text' || name === 'press_key') {
+        const target = String(args.element_token).endsWith(':2') ? 'observed' : 'current';
+        values[target] += String(args.text ?? args.key);
+        return { content: [], structuredContent: { route: 'accessibility', effect: 'confirmed' } };
+      }
+      if (name === 'hotkey') return { content: [], structuredContent: { effect: 'unverifiable' } };
       throw new Error(`unexpected ${name}`);
     },
   } as unknown as CuaDriverService;
@@ -207,6 +288,48 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
   );
   assert.match(afterClose.text, /stale_frame|no_active_frame/);
   assert.equal(calls.filter((call) => call.name === 'click').length, 2);
+
+  const inputObservation = async (id: string) => {
+    const result = await invoke(
+      { action: 'observe', app: 'com.example.fixture', include_screenshot: false },
+      id,
+    );
+    const observationId = /observation_id[^\n]*?([a-f0-9-]{36})/i.exec(result.text)?.[1];
+    assert.ok(observationId);
+    return observationId;
+  };
+  await invoke(
+    {
+      action: 'type',
+      observation_id: await inputObservation('observe-type'),
+      element_id: '2',
+      text: 'PRIVATE',
+    },
+    'type-after-focus-moved',
+  );
+  await invoke(
+    {
+      action: 'press_key',
+      observation_id: await inputObservation('observe-key'),
+      element_id: '2',
+      text: 'Backspace',
+    },
+    'key-after-focus-moved',
+  );
+  assert.deepEqual(values, { observed: 'PRIVATEBackspace', current: '' });
+  const noFocus = await inputObservation('observe-without-focus');
+  const inputCalls = calls.filter((call) => call.name === 'type_text').length;
+  const unbound = await invoke(
+    { action: 'type', observation_id: noFocus, text: 'unbound' },
+    'type-without-focus',
+  );
+  assert.match(unbound.text, /dispatch_refused/);
+  assert.equal(calls.filter((call) => call.name === 'type_text').length, inputCalls);
+  await invoke(
+    { action: 'key', observation_id: await inputObservation('observe-hotkey'), text: 'cmd+s' },
+    'window-hotkey',
+  );
+  assert.equal(calls.filter((call) => call.name === 'hotkey').length, 1);
   backend.dispose();
 });
 
