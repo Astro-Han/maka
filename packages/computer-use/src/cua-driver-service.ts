@@ -34,6 +34,7 @@ export interface CuaDriverResult {
 export class CuaDriverService {
   private client?: Client;
   private opening?: Promise<Client>;
+  private closing?: Promise<void>;
   private state: CuaDriverServiceState = 'idle';
   private generation = 0;
 
@@ -58,6 +59,7 @@ export class CuaDriverService {
   }
 
   private async open(): Promise<Client> {
+    if (this.closing) await this.closing;
     if (this.state === 'disposed') throw new Error('Cua Driver service is disposed');
     if (this.client) return this.client;
     if (this.opening) return this.opening;
@@ -135,8 +137,17 @@ export class CuaDriverService {
       )) as CuaDriverResult;
     } catch (error) {
       if (SdkError.isInstance(error) && error.code === SdkErrorCode.RequestTimeout) {
-        this.invalidate(client);
-        await client.close().catch(() => {});
+        let closing = this.closing;
+        if (this.client === client) {
+          closing = client.close().catch(() => {});
+          this.closing = closing;
+          this.invalidate(client);
+        }
+        try {
+          await closing;
+        } finally {
+          if (this.closing === closing) this.closing = undefined;
+        }
       }
       throw error;
     }
@@ -147,5 +158,6 @@ export class CuaDriverService {
     const client = this.client;
     this.client = undefined;
     await client?.close().catch(() => {});
+    await this.closing;
   }
 }

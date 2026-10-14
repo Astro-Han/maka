@@ -28,7 +28,7 @@ import { Client } from '@modelcontextprotocol/client';
 import { createCuaDriverBackend } from '../cua-driver-backend.js';
 import { CuaDriverService, type CuaDriverResult } from '../cua-driver-service.js';
 
-test('a hung request retires its child without replay and the next observation restarts it', async (t) => {
+test('a hung request retires its child before a concurrent observation restarts it, without replay', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'maka-cua-timeout-'));
   const path = join(directory, 'cua-driver');
   const log = join(directory, 'calls');
@@ -38,6 +38,10 @@ const readline = require('node:readline');
 const log = ${JSON.stringify(log)};
 const recovered = fs.existsSync(log);
 fs.appendFileSync(log, process.pid + '\\n');
+if (!recovered) {
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 10000);
+}
 readline.createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
   if (request.method === 'initialize') {
@@ -61,34 +65,48 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
       params: Parameters<Client['callTool']>[0],
       options: Parameters<Client['callTool']>[1],
     ) {
-      return original.call(this, params, { ...options, timeout: 50 });
+      return original.call(this, params, { ...options, timeout: 250 });
     },
   );
   let invalidations = 0;
+  let notifyInvalidated!: () => void;
+  const invalidated = new Promise<void>((resolve) => {
+    notifyInvalidated = resolve;
+  });
   const service = new CuaDriverService(
     path,
     createHash('sha256').update(source).digest('hex'),
     () => {
       invalidations += 1;
+      notifyInvalidated();
     },
   );
+  let timedOut: Promise<void> | undefined;
   try {
     await writeFile(path, source, { mode: 0o755 });
     const signal = new AbortController().signal;
-    await assert.rejects(service.call('type_text', { text: 'once' }, signal), /timed out/i);
+    timedOut = assert.rejects(service.call('type_text', { text: 'once' }, signal), /timed out/i);
+    await Promise.race([
+      invalidated,
+      timedOut.then(() => {
+        throw new Error('Missing executor invalidation');
+      }),
+    ]);
     assert.equal(service.snapshot().state, 'unavailable');
     assert.equal(invalidations, 1);
     const retired = service.snapshot().generation;
     const result = await service.call('get_window_state', {}, signal);
+    const lines = (await readFile(log, 'utf8')).trim().split('\n');
+    assert.throws(() => process.kill(Number(lines[0]), 0), /ESRCH/);
+    await timedOut;
     assert.equal(result.structuredContent?.recovered, true);
     assert.ok(service.snapshot().generation > retired);
-    const lines = (await readFile(log, 'utf8')).trim().split('\n');
     assert.deepEqual(
       lines.filter((line) => !/^\d+$/.test(line)),
       ['type_text', 'get_window_state'],
     );
-    assert.throws(() => process.kill(Number(lines[0]), 0), /ESRCH/);
   } finally {
+    await timedOut?.catch(() => {});
     await service.dispose();
     await rm(directory, { recursive: true, force: true });
   }
