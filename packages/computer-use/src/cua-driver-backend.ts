@@ -95,7 +95,7 @@ const ERROR_SENTENCES: Record<ComputerUseErrorCode, string> = {
   outcome_unknown: 'The executor connection was lost. Observe before another action.',
   dispatch_refused: 'The target refused this action. Observe before trying another route.',
   foreground_required:
-    'The background action could not reach this window. Observe again and retry this one action with foreground delivery; Maka asks the user to approve it first.',
+    'The background action could not reach this window. Observe again and retry this one action with foreground delivery.',
 };
 
 const BEFORE_DISPATCH = new Set<ComputerUseErrorCode>([
