@@ -36,7 +36,6 @@ type RecordValue = Record<string, unknown>;
 
 interface Snapshot {
   observationId: string;
-  sessionId: string;
   turnId: string;
   generation: number;
   pid: number;
@@ -258,14 +257,6 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
     options.createService?.(options.binaryPath, options.expectedBinarySha256, onUnexpectedClose) ??
     new CuaDriverService(options.binaryPath, options.expectedBinarySha256, onUnexpectedClose);
 
-  async function call(
-    name: string,
-    args: RecordValue,
-    signal: AbortSignal,
-  ): Promise<CuaDriverResult> {
-    return service.call(name, args, signal);
-  }
-
   function current(observationId: string, context: CuRunContext): Snapshot | undefined {
     const snapshot = snapshots.get(context.sessionId);
     return snapshot?.observationId === observationId &&
@@ -286,12 +277,12 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
     signal: AbortSignal,
     context: CuRunContext,
   ): Promise<CuObservation> {
-    const windows = await call('list_windows', {}, signal);
+    const windows = await service.call('list_windows', {}, signal);
     if (windows.isError) throw new Error('list_windows failed');
     const candidates = Array.isArray(windows.structuredContent?.windows)
       ? windows.structuredContent.windows.map(object).filter((item): item is RecordValue => !!item)
       : [];
-    const apps = input.app ? await call('list_apps', {}, signal) : undefined;
+    const apps = input.app ? await service.call('list_apps', {}, signal) : undefined;
     if (apps?.isError) throw new Error('list_apps failed');
     const appRows = Array.isArray(apps?.structuredContent?.apps)
       ? apps.structuredContent.apps.map(object).filter((app): app is RecordValue => !!app)
@@ -330,7 +321,7 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
     const pid = number(window.pid);
     const windowId = number(window.window_id);
     if (!pid || !windowId) throw new Error('target_missing');
-    const result = await call(
+    const result = await service.call(
       'get_window_state',
       {
         pid,
@@ -418,7 +409,6 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
     const windowBounds = bounds(structured.window_bounds) ?? bounds(window.bounds);
     snapshots.set(context.sessionId, {
       observationId,
-      sessionId: context.sessionId,
       turnId: context.turnId,
       generation: service.snapshot().generation,
       pid,
@@ -462,7 +452,7 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
     if (await options.physicalInputRecentlyActive?.()) return failure('user_intervened');
     let result: CuaDriverResult;
     try {
-      result = await call(
+      result = await service.call(
         name,
         { ...args, pid: snapshot.pid, window_id: snapshot.windowId, session: context.sessionId },
         signal,
@@ -508,7 +498,7 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
       snapshots.delete(sessionId);
     },
     preflight: async (signal) => {
-      const result = await call('check_permissions', {}, signal);
+      const result = await service.call('check_permissions', {}, signal);
       if (result.isError) throw new Error('check_permissions failed');
       const state = result.structuredContent ?? {};
       return {
@@ -521,8 +511,8 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
     },
     listApps: async (signal): Promise<CuAppSummary[]> => {
       const [apps, windows] = await Promise.all([
-        call('list_apps', {}, signal),
-        call('list_windows', {}, signal),
+        service.call('list_apps', {}, signal),
+        service.call('list_windows', {}, signal),
       ]);
       if (apps.isError || windows.isError) throw new Error('list_apps failed');
       const appRows = Array.isArray(apps.structuredContent?.apps)
@@ -552,7 +542,7 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
         });
     },
     launchApp: async ({ app }, signal) => {
-      const result = await call(
+      const result = await service.call(
         'launch_app',
         app.includes('.') ? { bundle_id: app } : { name: app },
         signal,
@@ -672,14 +662,14 @@ export function createCuaDriverBackend(options: CuaDriverBackendOptions): CuDisp
         return { outcome: { ok: true, tier: 'ax', verified: true } };
       }
       const bound = context.boundAction?.target;
-      const snapshot = [...snapshots.values()].find(
-        (item) =>
-          item.sessionId === context.sessionId &&
-          item.turnId === context.turnId &&
-          item.pid === bound?.pid &&
-          item.windowId === bound?.windowId,
-      );
-      if (!snapshot) return failure('stale_frame');
+      const snapshot = snapshots.get(context.sessionId);
+      if (
+        !snapshot ||
+        snapshot.turnId !== context.turnId ||
+        snapshot.pid !== bound?.pid ||
+        snapshot.windowId !== bound?.windowId
+      )
+        return failure('stale_frame');
       if (action.type === 'screenshot') {
         try {
           const observation = await observe(

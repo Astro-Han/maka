@@ -17,11 +17,7 @@
  * under the License.
  */
 
-export {
-  selectComputerUseBackend,
-  CU_BACKEND_IDS,
-  DEFAULT_CU_BACKEND_ID,
-} from './select-backend.js';
+export { selectComputerUseBackend } from './select-backend.js';
 export type {
   ComputerUseBackendSelection,
   CuBackendId,

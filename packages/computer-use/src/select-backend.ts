@@ -22,9 +22,7 @@ import { type CuOverlayHook, type CuDispatchBackend } from '@maka/runtime/comput
 import { createCuaDriverBackend, type CuaDriverBackendOptions } from './cua-driver-backend.js';
 import type { CuaDriverService } from './cua-driver-service.js';
 
-export const CU_BACKEND_IDS = ['cua-driver'] as const;
-export type CuBackendId = (typeof CU_BACKEND_IDS)[number];
-export const DEFAULT_CU_BACKEND_ID: CuBackendId = 'cua-driver';
+export type CuBackendId = 'cua-driver';
 
 type DisposableBackend = CuDispatchBackend & {
   clearSession?: (sessionId: string) => void;
@@ -70,7 +68,7 @@ export interface ComputerUseBackendSelection {
   requestAccessibilityPermission?: CuaDriverBackendOptions['requestAccessibilityPermission'];
   screenLocked?: (context: { sessionId: string }) => boolean | Promise<boolean>;
   overlay?: CuOverlayHook;
-  createBackend?: (options: CuaDriverBackendOptions) => DisposableBackend;
+  createService?: CuaDriverBackendOptions['createService'];
 }
 
 export function selectComputerUseBackend(
@@ -80,9 +78,10 @@ export function selectComputerUseBackend(
   if (!deps?.binaryPath || !deps.expectedBinarySha256) return NONE;
   try {
     let tools: ComputerUseToolSet | undefined;
-    const backend = (deps.createBackend ?? createCuaDriverBackend)({
+    const backend = createCuaDriverBackend({
       binaryPath: deps.binaryPath,
       expectedBinarySha256: deps.expectedBinarySha256,
+      ...(deps.createService ? { createService: deps.createService } : {}),
       ...(deps.compressFrame ? { compressFrame: deps.compressFrame } : {}),
       ...(deps.physicalInputRecentlyActive
         ? { physicalInputRecentlyActive: deps.physicalInputRecentlyActive }
@@ -99,7 +98,7 @@ export function selectComputerUseBackend(
       ...(deps.overlay ? { overlay: deps.overlay } : {}),
       ...(deps.screenLocked ? { screenLocked: deps.screenLocked } : {}),
     });
-    return { backend, tools, backendId: DEFAULT_CU_BACKEND_ID };
+    return { backend, tools, backendId: 'cua-driver' };
   } catch {
     return NONE;
   }

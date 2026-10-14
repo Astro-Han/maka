@@ -109,9 +109,6 @@ export function createComputerUseHost(input: {
       return { selected: selectComputerUseBackend() };
     }
     return {
-      // No `backendId`: the host takes whatever `DEFAULT_CU_BACKEND_ID` names,
-      // so "which executor ships" is one decision recorded in one place rather
-      // than a default and a host that could disagree about it.
       selected: selectComputerUseBackend({
         binaryPath,
         expectedBinarySha256,

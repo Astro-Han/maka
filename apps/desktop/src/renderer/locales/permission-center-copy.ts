@@ -94,8 +94,6 @@ export type PermissionCenterCopy = {
   /** macOS drag-to-grant onboarding (accessibility / screen recording). */
   dragGrant: string;
   dragGranting: string;
-  // Single-backend assumption: CU_BACKEND_IDS is ['cua-driver'], so the backend
-  // name stays a literal in copy. Revisit when a second backend lands.
   cuBackendStatus(missingPermissionLabels: readonly string[], health: RuntimeProbeState): string;
   reasonFallback: string;
 };
