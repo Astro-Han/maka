@@ -21,7 +21,7 @@
 
 This package adapts the bundled Cua Driver CLI to Maka's existing `CuDispatchBackend`. Desktop verifies the pinned executable before selecting the backend. Runtime remains the authority for tool calls, sessions, observation binding, policy, and user-visible results.
 
-The CLI runs as a private stdio MCP child in direct embedded mode. Its MCP tools are not registered with the agent; the agent sees only `maka_computer`. The driver reads and acts in the background by default. A foreground action is explicit and limited to one tool call: Maka asks the user to approve each `delivery_mode=foreground` call before dispatch and remembers nothing. Telemetry and update checks are disabled for every launch.
+The CLI runs as a private stdio MCP child in direct embedded mode. Its MCP tools are not registered with the agent; the agent sees only `maka_computer`. The driver reads and acts in the background by default. A foreground action is explicit and limited to one tool call. Runtime Host applies the session permission mode to Computer Use, with no separate foreground approval. Telemetry and update checks are disabled for every launch.
 
 `node scripts/computer-use.mjs prepare` downloads the release pinned in `apps/desktop/bundled-tools.json`, verifies the archive, executable digest, version, and Developer ID signature, then stages `apps/desktop/resources/bin/cua-driver`. This binary is ignored by Git and included in macOS packages. The package uses the upstream signature unchanged so its runtime digest remains stable.
 

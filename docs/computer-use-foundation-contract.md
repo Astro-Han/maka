@@ -35,7 +35,7 @@ owners:
 适用范围：Desktop foundation；CLI 仅实验性 opt-in；Eval subject 通过 Runtime Host 继承同一边界
 目的：定义 stacked PR 不可破坏的合同与验证门。
 
-更换 native executor 后，下述稳定元素身份、键盘 ownership、真实设备恢复路径仍需针对 Cua Driver 重新验证。当前实现用 Cua 的 snapshot token 和 Maka Runtime Host 的 observation claim 阻止旧动作重放，但不能据此声称已满足这些更强的条款。WebContent 已在真实 Safari 上验证到失败即拒绝：观察后页面导航，再按旧 token 点击，Cua 返回 `element_outside_target_window`，新页面没有收到点击。前台投递由宿主逐次确认：带 `delivery_mode: foreground` 的调用在派发前弹出确认表单，用户接受才执行；拒绝、取消或所在界面没有表单能力都按 `policy_denied` 拒绝，不留存授权。
+更换 native executor 后，下述稳定元素身份、键盘 ownership、真实设备恢复路径仍需针对 Cua Driver 重新验证。当前实现用 Cua 的 snapshot token 和 Maka Runtime Host 的 observation claim 阻止旧动作重放，但不能据此声称已满足这些更强的条款。WebContent 已在真实 Safari 上验证到失败即拒绝：观察后页面导航，再按旧 token 点击，Cua 返回 `element_outside_target_window`，新页面没有收到点击。前台投递沿用 Runtime Host 的会话权限模式：`bypass` 不追加确认；当前 Host 未支持 Computer Use 的 managed 审批，非 `bypass` 拒绝执行。Computer Use 不另建前台审批；后台失败不会自动切到前台。
 
 外部证据参考（不属于本仓库）：
 
@@ -71,7 +71,7 @@ owners:
 
 4. Execution ownership
    - Cua Driver 是 macOS 唯一 native executor；Maka 的 Runtime Host 仍是 Session、Turn、policy 和 tool result 的权威，私有 MCP 仅作为到子进程的传输。
-   - agent 不得移动真实鼠标或执行 windowless desktop input。默认后台；需要前台时先在对话中说明并等用户明确同意，再重新观察，只对该动作传 `delivery_mode=foreground`。没有自动前台重试，也没有独立的 Maka 前台审批状态。
+   - agent 不得移动真实鼠标或执行 windowless desktop input。默认后台；后台明确要求前台或重新观察证明后台操作未生效时，再重新观察，只对该动作传 `delivery_mode=foreground`。权限由 Runtime Host 的会话模式决定。没有自动前台重试，也没有独立的 Maka 前台审批状态。
    - keyboard ownership 绑定 `session + turn + generation + pid + windowId + page/frame`，并在失败、stale、新 observation、intervention、service generation 变化、turn/session 结束时撤销。
    - child process 在未知 action outcome 下退出时必须 re-observe，禁止自动重放。
 

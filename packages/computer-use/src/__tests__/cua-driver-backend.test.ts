@@ -115,7 +115,7 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
         return {
           isError: true,
           content: [{ type: 'text', text: 'untrusted app content' }],
-          structuredContent: { code: 'background_unavailable' },
+          structuredContent: { code: 'same_pid_keyboard_ambiguity' },
         };
       }
       if (name === 'click' && args.delivery_mode === 'foreground') {
@@ -134,8 +134,6 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
     onSessionInvalidated: ({ sessionId }) => invalidated.push(sessionId),
   });
   const [tool] = buildComputerUseTools({ backend });
-  const forms: string[] = [];
-  let formAnswer: 'accept' | 'decline' = 'decline';
   const context = (toolCallId: string) => ({
     sessionId: 'session-1',
     turnId: 'turn-1',
@@ -143,11 +141,9 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
     cwd: '/tmp',
     abortSignal: new AbortController().signal,
     emitOutput() {},
-    requestUserForm: async (form: { message: string }) => {
-      forms.push(form.message);
-      return formAnswer === 'accept'
-        ? { action: 'accept' as const, values: {} }
-        : { action: 'decline' as const };
+    permissionMode: 'bypass' as const,
+    requestUserForm: async () => {
+      throw new Error('Computer Use must not add approval after Host admission');
     },
   });
   const invoke = async (args: Record<string, unknown>, id: string): Promise<{ text: string }> =>
@@ -175,30 +171,6 @@ test('bundle-id observation, background refusal, and explicit foreground retry p
   );
   const nextObservation = /observation_id[^\n]*?([a-f0-9-]{36})/i.exec(refreshed.text)?.[1];
   assert.ok(nextObservation);
-  const declined = await invoke(
-    {
-      action: 'click_element',
-      observation_id: nextObservation,
-      element_id: '1',
-      delivery_mode: 'foreground',
-    },
-    'click-foreground-declined',
-  );
-  assert.match(declined.text, /policy_denied/);
-  assert.equal(calls.filter((call) => call.name === 'click').length, 1);
-  assert.match(forms[0] ?? '', /com\.example\.fixture.*“Submit”/);
-  const formless = (await tool!.impl(
-    {
-      action: 'click_element',
-      observation_id: nextObservation,
-      element_id: '1',
-      delivery_mode: 'foreground',
-    } as never,
-    { ...context('click-foreground-formless'), requestUserForm: undefined },
-  )) as { text: string };
-  assert.match(formless.text, /policy_denied/);
-  assert.equal(calls.filter((call) => call.name === 'click').length, 1);
-  formAnswer = 'accept';
   const foreground = await invoke(
     {
       action: 'click_element',

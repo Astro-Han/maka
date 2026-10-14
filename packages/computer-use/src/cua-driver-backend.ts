@@ -238,6 +238,7 @@ function refusalCode(result: CuaDriverResult): ComputerUseErrorCode | undefined 
     case 'policy_denied':
       return 'policy_denied';
     case 'background_unavailable':
+    case 'same_pid_keyboard_ambiguity':
       return 'foreground_required';
     default:
       return result.isError ? 'dispatch_refused' : undefined;

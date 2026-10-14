@@ -230,7 +230,7 @@ export const computerWireParams = z
       .enum(['background', 'foreground'])
       .optional()
       .describe(
-        'For click_element, secondary_action, scroll_element, press_key, type, and key. Defaults to background. Use foreground only when background reports foreground_required, or when background is unverifiable and a fresh observation proves the intended effect did not occur. Maka asks the user to approve each foreground call before it runs; it briefly activates the target and restores the previous app.',
+        'For click_element, secondary_action, scroll_element, press_key, type, and key. Defaults to background. Use foreground only when background reports foreground_required, or when background is unverifiable and a fresh observation proves the intended effect did not occur. It briefly activates the target and restores the previous app. Runtime Host applies the session permission mode.',
       ),
     element_id: z
       .string()
@@ -841,36 +841,6 @@ export function buildComputerUseTools(deps: {
     return {
       text: `${tool} failed: ${reason} — ${SESSION_BLOCK_RECOVERY[reason]}`,
       error: reason,
-    };
-  }
-
-  async function foregroundRefusal(
-    input: ComputerParams,
-    sessionId: string,
-    requestUserForm: MakaToolContext['requestUserForm'],
-    signal: AbortSignal,
-  ): Promise<ComputerToolResult | undefined> {
-    const record = observations.get(sessionId);
-    const app = record?.appAlias ?? record?.appId ?? 'the observed application';
-    const elementId = 'element_id' in input ? input.element_id : undefined;
-    const label = elementId ? record?.elements?.get(elementId)?.label : undefined;
-    const answer = await requestUserForm?.(
-      {
-        message:
-          `Bring ${app} to the front for one ${input.action}` +
-          `${label ? ` on “${label}”` : ''}? ` +
-          'It briefly activates the app, then returns to the app you were using.',
-        requester: { name: 'Computer Use' },
-        fields: [],
-      },
-      { cancellationSignal: signal },
-    );
-    if (answer?.action === 'accept') return undefined;
-    return {
-      text:
-        `maka_computer.${input.action} failed: policy_denied — the user did not allow foreground delivery ` +
-        'for this action. Do not ask again for the same action; continue in the background or report what could not be done.',
-      error: 'policy_denied',
     };
   }
 
@@ -1630,7 +1600,7 @@ export function buildComputerUseTools(deps: {
       'A menu shortcut — cmd+P, cmd+S, cmd+W, ctrl+F2 and the like — cannot reach an application that is not ' +
       'frontmost, because macOS routes it through the frontmost window. ' +
       'Use the menu observation and click its returned command instead. ' +
-      'Try every action in the background first. If the executor reports foreground_required, or a fresh observation proves an unverifiable background action had no effect, observe again and retry only that action with delivery_mode=foreground. Maka asks the user to approve that one call; it briefly activates the target and restores the previous app. There is no automatic foreground retry. ' +
+      'Try every action in the background first. If the executor reports foreground_required, or a fresh observation proves an unverifiable background action had no effect, observe again and retry only that action with delivery_mode=foreground. It briefly activates the target and restores the previous app. Runtime Host applies the session permission mode; there is no separate foreground approval or automatic foreground retry. ' +
       'A "+name,name" suffix lists what that element accepts as a secondary_action, and an element with no suffix ' +
       'offers nothing beyond click_element that this executor knows of. ' +
       '[focused] marks where a key sent without an element_id will land, when the executor reports focus. ' +
@@ -1699,7 +1669,7 @@ export function buildComputerUseTools(deps: {
     },
     impl: async (
       args,
-      { abortSignal, sessionId, turnId, toolCallId, emitProgress, requestUserForm },
+      { abortSignal, sessionId, turnId, toolCallId, emitProgress },
     ): Promise<ComputerToolResult> => {
       if (abortSignal.aborted)
         return { text: 'computer aborted before start', error: 'user_stopped' };
@@ -1710,10 +1680,6 @@ export function buildComputerUseTools(deps: {
       // of the record, not a value, and every path below would have typed it.
       const replayed = withheldValueReplayed(input);
       if (replayed) return replayed;
-      if ('delivery_mode' in input && input.delivery_mode === 'foreground') {
-        const refused = await foregroundRefusal(input, sessionId, requestUserForm, abortSignal);
-        if (refused) return refused;
-      }
       const invocationGeneration = presentationGenerations.get(sessionId) ?? 0;
       const releasePendingInvocation = trackPendingInvocation(sessionId, turnId);
       try {
